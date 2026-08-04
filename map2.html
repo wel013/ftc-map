@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FTC Teams World Map</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css" />
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css" />
+    <script
+        src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #1a1a2e;
+        }
+
+        #map {
+            height: 100vh;
+            width: 100%;
+        }
+
+        #panel {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 1000;
+            width: 280px;
+            background: rgba(255, 255, 255, 0.97);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+            overflow: hidden;
+        }
+
+        #panel-header {
+            background: #d62728;
+            color: white;
+            padding: 14px 16px 10px;
+        }
+
+        #panel-header h1 {
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+        }
+
+        #panel-header p {
+            font-size: 11px;
+            opacity: 0.85;
+            margin-top: 2px;
+        }
+
+        #panel-body {
+            padding: 12px;
+        }
+
+        #search {
+            width: 100%;
+            padding: 7px 10px;
+            border: 1.5px solid #ddd;
+            border-radius: 6px;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        #search:focus {
+            border-color: #d62728;
+        }
+
+        #filters {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+            flex-direction: column;
+        }
+
+        #filters select {
+            width: 100%;
+            padding: 5px 8px;
+            border: 1.5px solid #ddd;
+            border-radius: 6px;
+            font-size: 12px;
+            background: white;
+            outline: none;
+            cursor: pointer;
+        }
+
+        #filters select:focus {
+            border-color: #d62728;
+        }
+
+        #stats {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #555;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #team-count {
+            font-weight: 600;
+            color: #222;
+        }
+
+        #reset-btn {
+            font-size: 11px;
+            color: #d62728;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0;
+            text-decoration: underline;
+        }
+
+        #reset-btn:hover {
+            opacity: 0.7;
+        }
+
+        #legend {
+            position: absolute;
+            bottom: 24px;
+            left: 12px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 12px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+            color: #333;
+        }
+
+        #legend strong {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #888;
+        }
+
+        .legend-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="map"></div>
+
+    <div id="panel">
+        <div id="panel-header">
+            <h1>🤖 FTC Teams World Map</h1>
+            <p>FIRST Tech Challenge · All registered teams</p>
+        </div>
+        <div id="panel-body">
+            <input id="search" type="text" placeholder="Search team name, number, city…" />
+            <div id="filters">
+                <select id="country-filter">
+                    <option value="">All countries</option>
+                </select>
+                <select id="state-filter">
+                    <option value="">All states / provinces</option>
+                </select>
+            </div>
+            <div id="stats">
+                <span>Showing <span id="team-count">—</span> teams</span>
+                <button id="reset-btn" onclick="resetFilters()">Reset</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="legend">
+        <strong>Cluster size</strong>
+        <div class="legend-row">
+            <div class="legend-dot" style="background:#6baed6"></div> &lt; 10 teams
+        </div>
+        <div class="legend-row">
+            <div class="legend-dot" style="background:#fd8d3c"></div> 10 – 100 teams
+        </div>
+        <div class="legend-row">
+            <div class="legend-dot" style="background:#e31a1c"></div> 100+ teams
+        </div>
+    </div>
+
+    <script>
+        // ── Country display name overrides ────────────────────────────────────────────
+        const COUNTRY_NAMES = {
+            'USA': 'United States', 'South Korea': 'South Korea', 'Türkiye': 'Turkey',
+            'Vietnam': 'Vietnam', 'Moldova': 'Moldova', 'Venezuela': 'Venezuela',
+            'Czech Republic': 'Czech Republic', 'Macedonia': 'North Macedonia', 'Laos': 'Laos',
+            'Chinese Taipei': 'Chinese Taipei', 'Bosnia-Herzegovina': 'Bosnia and Herzegovina',
+            'Ivory Coast': "Côte d'Ivoire", 'Independent': 'Independent (No Country)',
+        };
+
+        // ── State / province full names keyed by country ──────────────────────────────
+        const STATE_NAMES = {
+            'USA': {
+                'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas', 'CA': 'California',
+                'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware', 'FL': 'Florida', 'GA': 'Georgia',
+                'HI': 'Hawaii', 'ID': 'Idaho', 'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa',
+                'KS': 'Kansas', 'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
+                'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi',
+                'MO': 'Missouri', 'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada', 'NH': 'New Hampshire',
+                'NJ': 'New Jersey', 'NM': 'New Mexico', 'NY': 'New York', 'NC': 'North Carolina',
+                'ND': 'North Dakota', 'OH': 'Ohio', 'OK': 'Oklahoma', 'OR': 'Oregon', 'PA': 'Pennsylvania',
+                'RI': 'Rhode Island', 'SC': 'South Carolina', 'SD': 'South Dakota', 'TN': 'Tennessee',
+                'TX': 'Texas', 'UT': 'Utah', 'VT': 'Vermont', 'VA': 'Virginia', 'WA': 'Washington',
+                'WV': 'West Virginia', 'WI': 'Wisconsin', 'WY': 'Wyoming', 'DC': 'District of Columbia',
+                'PR': 'Puerto Rico', 'GU': 'Guam', 'VI': 'U.S. Virgin Islands', 'AS': 'American Samoa',
+                'AE': 'Armed Forces Europe', 'AP': 'Armed Forces Pacific', 'AA': 'Armed Forces Americas',
+            },
+            'Canada': {
+                'AB': 'Alberta', 'BC': 'British Columbia', 'MB': 'Manitoba', 'NB': 'New Brunswick',
+                'NL': 'Newfoundland and Labrador', 'NS': 'Nova Scotia', 'NT': 'Northwest Territories',
+                'NU': 'Nunavut', 'ON': 'Ontario', 'PE': 'Prince Edward Island', 'QC': 'Quebec',
+                'SK': 'Saskatchewan', 'YT': 'Yukon',
+            },
+            'Kazakhstan': {
+                'ALA': 'Almaty (city)', 'AST': 'Astana', 'SHY': 'Shymkent', 'MAN': 'Mangystau',
+                'AKM': 'Akmola', 'ALM': 'Almaty Region', 'KAR': 'Karaganda', 'VOS': 'East Kazakhstan',
+                'AKT': 'Aktobe', 'ATY': 'Atyrau', 'ZAP': 'West Kazakhstan', 'YUZ': 'Turkestan',
+                'KZY': 'Kyzylorda', 'ZHA': 'Zhambyl', 'KUS': 'Kostanay', 'PAV': 'Pavlodar',
+                'SEV': 'North Kazakhstan', 'BAY': 'Baikonur', 'ABY': 'Abai', 'ULY': 'Ulytau', 'ZHE': 'Zhetysu',
+            },
+            'China': {
+                'AH': 'Anhui', 'BJ': 'Beijing', 'CQ': 'Chongqing', 'FJ': 'Fujian', 'GD': 'Guangdong',
+                'GS': 'Gansu', 'GX': 'Guangxi', 'GZ': 'Guizhou', 'HA': 'Henan', 'HB': 'Hubei',
+                'HE': 'Hebei', 'HI': 'Hainan', 'HN': 'Hunan', 'HL': 'Heilongjiang', 'JL': 'Jilin',
+                'JS': 'Jiangsu', 'JX': 'Jiangxi', 'LN': 'Liaoning', 'NM': 'Inner Mongolia', 'NX': 'Ningxia',
+                'QH': 'Qinghai', 'SC': 'Sichuan', 'SD': 'Shandong', 'SH': 'Shanghai', 'SN': 'Shaanxi',
+                'SX': 'Shanxi', 'TJ': 'Tianjin', 'XJ': 'Xinjiang', 'XZ': 'Tibet', 'YN': 'Yunnan', 'ZJ': 'Zhejiang',
+            },
+            'Chinese Taipei': {
+                'TPE': 'Taipei City', 'NWT': 'New Taipei City', 'TXG': 'Taichung City', 'TNN': 'Tainan City',
+                'KHH': 'Kaohsiung City', 'TAO': 'Taoyuan City', 'HSC': 'Hsinchu City', 'HSQ': 'Hsinchu County',
+                'MIA': 'Miaoli County', 'CHA': 'Changhua County', 'NAN': 'Nantou County', 'YUN': 'Yunlin County',
+                'CYI': 'Chiayi City', 'CYQ': 'Chiayi County', 'PIF': 'Pingtung County', 'ILA': 'Yilan County',
+                'HUA': 'Hualien County', 'TTT': 'Taitung County', 'PEN': 'Penghu County',
+                'KIN': 'Kinmen County', 'LIE': 'Lienchiang County',
+            },
+            'Australia': {
+                'ACT': 'Australian Capital Territory', 'NSW': 'New South Wales', 'NT': 'Northern Territory',
+                'QLD': 'Queensland', 'SA': 'South Australia', 'TAS': 'Tasmania', 'VIC': 'Victoria', 'WA': 'Western Australia',
+            },
+            'United Kingdom': {
+                'ENG': 'England', 'NIR': 'Northern Ireland', 'SCT': 'Scotland', 'WLS': 'Wales',
+                'VG': 'British Virgin Islands',
+            },
+            'India': {
+                'AN': 'Andaman and Nicobar Islands', 'AP': 'Andhra Pradesh', 'AR': 'Arunachal Pradesh',
+                'AS': 'Assam', 'BR': 'Bihar', 'CH': 'Chandigarh', 'CT': 'Chhattisgarh', 'DL': 'Delhi',
+                'GA': 'Goa', 'GJ': 'Gujarat', 'HR': 'Haryana', 'HP': 'Himachal Pradesh',
+                'JK': 'Jammu and Kashmir', 'JH': 'Jharkhand', 'KA': 'Karnataka', 'KL': 'Kerala',
+                'LD': 'Lakshadweep', 'MP': 'Madhya Pradesh', 'MH': 'Maharashtra', 'MN': 'Manipur',
+                'ML': 'Meghalaya', 'MZ': 'Mizoram', 'NL': 'Nagaland', 'OD': 'Odisha', 'OR': 'Odisha',
+                'PY': 'Puducherry', 'PB': 'Punjab', 'RJ': 'Rajasthan', 'SK': 'Sikkim', 'TN': 'Tamil Nadu',
+                'TG': 'Telangana', 'TR': 'Tripura', 'UP': 'Uttar Pradesh', 'UT': 'Uttarakhand', 'WB': 'West Bengal',
+            },
+            'Mexico': {
+                'AGU': 'Aguascalientes', 'BCN': 'Baja California', 'BCS': 'Baja California Sur',
+                'CAM': 'Campeche', 'CHP': 'Chiapas', 'CHH': 'Chihuahua', 'CMX': 'Mexico City',
+                'COA': 'Coahuila', 'COL': 'Colima', 'DUR': 'Durango', 'GUA': 'Guanajuato', 'GRO': 'Guerrero',
+                'HID': 'Hidalgo', 'JAL': 'Jalisco', 'MEX': 'State of Mexico', 'MIC': 'Michoacán',
+                'MOR': 'Morelos', 'NAY': 'Nayarit', 'NLE': 'Nuevo León', 'OAX': 'Oaxaca', 'PUE': 'Puebla',
+                'QUE': 'Querétaro', 'ROO': 'Quintana Roo', 'SLP': 'San Luis Potosí', 'SIN': 'Sinaloa',
+                'SON': 'Sonora', 'TAB': 'Tabasco', 'TAM': 'Tamaulipas', 'TLA': 'Tlaxcala',
+                'VER': 'Veracruz', 'YUC': 'Yucatán', 'ZAC': 'Zacatecas',
+            },
+            'Brazil': {
+                'AC': 'Acre', 'AL': 'Alagoas', 'AP': 'Amapá', 'AM': 'Amazonas', 'BA': 'Bahia', 'CE': 'Ceará',
+                'DF': 'Federal District', 'ES': 'Espírito Santo', 'GO': 'Goiás', 'MA': 'Maranhão',
+                'MT': 'Mato Grosso', 'MS': 'Mato Grosso do Sul', 'MG': 'Minas Gerais', 'PA': 'Pará',
+                'PB': 'Paraíba', 'PR': 'Paraná', 'PE': 'Pernambuco', 'PI': 'Piauí', 'RJ': 'Rio de Janeiro',
+                'RN': 'Rio Grande do Norte', 'RS': 'Rio Grande do Sul', 'RO': 'Rondônia', 'RR': 'Roraima',
+                'SC': 'Santa Catarina', 'SP': 'São Paulo', 'SE': 'Sergipe', 'TO': 'Tocantins',
+            },
+            'Romania': {
+                'AB': 'Alba', 'AR': 'Arad', 'AG': 'Argeș', 'BC': 'Bacău', 'BH': 'Bihor', 'BN': 'Bistrița-Năsăud',
+                'BT': 'Botoșani', 'BV': 'Brașov', 'BR': 'Brăila', 'B': 'Bucharest', 'BZ': 'Buzău',
+                'CS': 'Caraș-Severin', 'CL': 'Călărași', 'CJ': 'Cluj', 'CT': 'Constanța', 'CV': 'Covasna',
+                'DB': 'Dâmbovița', 'DJ': 'Dolj', 'GL': 'Galați', 'GR': 'Giurgiu', 'GJ': 'Gorj',
+                'HR': 'Harghita', 'HD': 'Hunedoara', 'IL': 'Ialomița', 'IS': 'Iași', 'IF': 'Ilfov',
+                'MM': 'Maramureș', 'MH': 'Mehedinți', 'MS': 'Mureș', 'NT': 'Neamț', 'OT': 'Olt',
+                'PH': 'Prahova', 'SM': 'Satu Mare', 'SJ': 'Sălaj', 'SB': 'Sibiu', 'SV': 'Suceava',
+                'TR': 'Teleorman', 'TM': 'Timiș', 'TL': 'Tulcea', 'VS': 'Vaslui', 'VL': 'Vâlcea', 'VN': 'Vrancea',
+            },
+            'South Korea': {
+                '11': 'Seoul', '26': 'Busan', '27': 'Daegu', '28': 'Incheon', '29': 'Gwangju', '30': 'Daejeon',
+                '31': 'Ulsan', '36': 'Sejong', '41': 'Gyeonggi', '42': 'Gangwon',
+                '43': 'North Chungcheong', '44': 'South Chungcheong', '45': 'North Jeolla',
+                '46': 'South Jeolla', '47': 'North Gyeongsang', '48': 'South Gyeongsang', '49': 'Jeju',
+            },
+            'Thailand': {
+                '10': 'Bangkok', '11': 'Samut Prakan', '12': 'Nonthaburi', '13': 'Pathum Thani',
+                '14': 'Phra Nakhon Si Ayutthaya', '20': 'Chonburi', '21': 'Rayong', '30': 'Nakhon Ratchasima',
+                '31': 'Buri Ram', '32': 'Surin', '40': 'Khon Kaen', '41': 'Udon Thani', '50': 'Chiang Mai',
+                '51': 'Lamphun', '52': 'Lampang', '57': 'Chiang Rai', '60': 'Nakhon Sawan',
+                '67': 'Phetchabun', '73': 'Nakhon Pathom', '76': 'Phetchaburi', '80': 'Nakhon Si Thammarat',
+                '83': 'Phuket', '84': 'Surat Thani', '90': 'Songkhla',
+            },
+            'France': {
+                'ARA': 'Auvergne-Rhône-Alpes', 'BFC': 'Bourgogne-Franche-Comté', 'BRE': 'Brittany',
+                'CVL': 'Centre-Val de Loire', 'COR': 'Corsica', 'GES': 'Grand Est', 'HDF': 'Hauts-de-France',
+                'IDF': 'Île-de-France', 'NOR': 'Normandy', 'NAQ': 'Nouvelle-Aquitaine', 'OCC': 'Occitanie',
+                'PDL': 'Pays de la Loire', 'PAC': "Provence-Alpes-Côte d'Azur",
+                '75': 'Paris', 'MQ': 'Martinique', 'GP': 'Guadeloupe', 'RE': 'Réunion', 'GF': 'French Guiana',
+            },
+            'Germany': {
+                'BB': 'Brandenburg', 'BE': 'Berlin', 'BW': 'Baden-Württemberg', 'BY': 'Bavaria',
+                'HB': 'Bremen', 'HE': 'Hesse', 'HH': 'Hamburg', 'MV': 'Mecklenburg-Vorpommern',
+                'NI': 'Lower Saxony', 'NW': 'North Rhine-Westphalia', 'RP': 'Rhineland-Palatinate',
+                'SH': 'Schleswig-Holstein', 'SL': 'Saarland', 'SN': 'Saxony', 'ST': 'Saxony-Anhalt', 'TH': 'Thuringia',
+            },
+            'Saudi Arabia': {
+                '01': 'Riyadh', '02': 'Mecca', '03': 'Medina', '04': 'Eastern Province',
+                '05': 'Al Qassim', '06': 'Ha\'il', '07': 'Tabuk', '08': 'Northern Borders',
+                '09': 'Riyadh Region', '10': 'Najran', '11': 'Al Bahah', '12': 'Al Jawf', '13': 'Asir',
+            },
+            'Netherlands': {
+                'DR': 'Drenthe', 'FL': 'Flevoland', 'FR': 'Friesland', 'GE': 'Gelderland', 'GR': 'Groningen',
+                'LI': 'Limburg', 'NB': 'North Brabant', 'NH': 'North Holland', 'OV': 'Overijssel',
+                'UT': 'Utrecht', 'ZE': 'Zeeland', 'ZH': 'South Holland',
+            },
+            'South Africa': {
+                'EC': 'Eastern Cape', 'FS': 'Free State', 'GP': 'Gauteng', 'KZN': 'KwaZulu-Natal',
+                'LP': 'Limpopo', 'MP': 'Mpumalanga', 'NC': 'Northern Cape', 'NW': 'North West', 'WC': 'Western Cape',
+            },
+            'Indonesia': {
+                'AC': 'Aceh', 'BA': 'Bali', 'BB': 'Bangka Belitung', 'BT': 'Banten', 'BE': 'Bengkulu',
+                'GO': 'Gorontalo', 'JK': 'Jakarta', 'JA': 'Jambi', 'JB': 'West Java', 'JT': 'Central Java',
+                'JI': 'East Java', 'KB': 'West Kalimantan', 'KS': 'South Kalimantan', 'KT': 'Central Kalimantan',
+                'KI': 'East Kalimantan', 'KU': 'North Kalimantan', 'LA': 'West Sulawesi', 'MA': 'Maluku',
+                'MU': 'North Maluku', 'NB': 'West Nusa Tenggara', 'NT': 'East Nusa Tenggara',
+                'PA': 'Papua', 'PB': 'West Papua', 'RI': 'Riau', 'SN': 'South Sulawesi', 'ST': 'Central Sulawesi',
+                'SG': 'Southeast Sulawesi', 'SA': 'North Sulawesi', 'SS': 'South Sumatra',
+                'SB': 'West Sumatra', 'SU': 'North Sumatra', 'YO': 'Yogyakarta',
+            },
+            'Vietnam': {
+                '01': 'Hanoi', '02': 'Ho Chi Minh City', '03': 'Hai Phong', '04': 'Da Nang',
+                '33': 'Quang Nam', '34': 'Quang Ngai', '35': 'Binh Dinh', '36': 'Phu Yen',
+                '37': 'Khanh Hoa', '40': 'Dak Lak', '41': 'Lam Dong', '44': 'Binh Phuoc',
+                '45': 'Tay Ninh', '46': 'Binh Duong', '47': 'Dong Nai', '48': 'Ba Ria-Vung Tau',
+                '49': 'Long An', '52': 'Tien Giang', '56': 'Can Tho',
+            },
+            'Israel': {
+                'D': 'Southern District', 'HA': 'Haifa District', 'JM': 'Jerusalem District',
+                'M': 'Central District', 'Z': 'Northern District', 'TA': 'Tel Aviv District',
+            },
+            'Lithuania': {
+                'AL': 'Alytus', 'KU': 'Kaunas', 'KL': 'Klaipėda', 'MR': 'Marijampolė',
+                'PN': 'Panevėžys', 'SA': 'Šiauliai', 'TA': 'Tauragė', 'TE': 'Telšiai', 'UT': 'Utena', 'VL': 'Vilnius',
+            },
+            'Malaysia': {
+                'JHR': 'Johor', 'KDH': 'Kedah', 'KTN': 'Kelantan', 'KUL': 'Kuala Lumpur', 'LBN': 'Labuan',
+                'MLK': 'Malacca', 'NSN': 'Negeri Sembilan', 'PHG': 'Pahang', 'PJY': 'Putrajaya',
+                'PLS': 'Perlis', 'PNG': 'Penang', 'PRK': 'Perak', 'SBH': 'Sabah', 'SGR': 'Selangor',
+                'SWK': 'Sarawak', 'TRG': 'Terengganu',
+            },
+            'New Zealand': {
+                'AUK': 'Auckland', 'BOP': 'Bay of Plenty', 'CAN': 'Canterbury', 'GIS': 'Gisborne',
+                'HKB': "Hawke's Bay", 'MBH': 'Marlborough', 'MWT': 'Manawatu-Whanganui', 'NSN': 'Nelson',
+                'NTL': 'Northland', 'OTA': 'Otago', 'STL': 'Southland', 'TAS': 'Tasman',
+                'TKI': 'Taranaki', 'WGN': 'Wellington', 'WKO': 'Waikato', 'WTC': 'West Coast',
+            },
+            'Greece': {
+                'A1': 'Attica', 'B': 'Central Macedonia', 'C': 'Western Macedonia', 'D': 'Epirus',
+                'E': 'Thessaly', 'F': 'Ionian Islands', 'G': 'Western Greece', 'H': 'Central Greece',
+                'I': 'Peloponnese', 'J': 'Northern Aegean', 'K': 'South Aegean', 'L': 'Crete',
+                'M': 'Eastern Macedonia and Thrace',
+            },
+        };
+
+        function getStateName(country, code) {
+            if (!code) return '';
+            return (STATE_NAMES[country] && STATE_NAMES[country][code]) || code;
+        }
+
+        function getCountryName(raw) {
+            return COUNTRY_NAMES[raw] || raw;
+        }
+
+        // ── Map init ──────────────────────────────────────────────────────────────────
+        const map = L.map('map', { preferCanvas: true }).setView([20, 10], 2);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '© <a href="https://www.openstreetmap.org/">OSM</a> © <a href="https://carto.com/">CARTO</a>',
+            subdomains: 'abcd', maxZoom: 19
+        }).addTo(map);
+
+        let allTeams = [];
+        let clusterGroup = L.markerClusterGroup({ chunkedLoading: true });
+        map.addLayer(clusterGroup);
+
+        // ── Load data ─────────────────────────────────────────────────────────────────
+        fetch('ftc_teams.json')
+            .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+            .then(teams => {
+                allTeams = teams.filter(t => t.lat != null && t.lng != null);
+                populateCountries(allTeams);
+                renderMarkers(allTeams);
+            })
+            .catch(err => {
+                document.getElementById('team-count').textContent = '⚠ Could not load ftc_teams.json';
+                console.error(err);
+            });
+
+        // ── Populate country dropdown ─────────────────────────────────────────────────
+        function populateCountries(teams) {
+            const rawCountries = [...new Set(teams.map(t => t.country).filter(Boolean))];
+            rawCountries.sort((a, b) => getCountryName(a).localeCompare(getCountryName(b)));
+            const sel = document.getElementById('country-filter');
+            rawCountries.forEach(raw => {
+                const opt = document.createElement('option');
+                opt.value = raw;
+                opt.textContent = getCountryName(raw);
+                sel.appendChild(opt);
+            });
+        }
+
+        // ── Update state dropdown when country changes ────────────────────────────────
+        document.getElementById('country-filter').addEventListener('change', function () {
+            const country = this.value;
+            const stateSelect = document.getElementById('state-filter');
+            stateSelect.innerHTML = '<option value="">All states / provinces</option>';
+
+            if (country) {
+                const rawCodes = [...new Set(
+                    allTeams.filter(t => t.country === country).map(t => t.state).filter(Boolean)
+                )];
+                rawCodes.sort((a, b) => getStateName(country, a).localeCompare(getStateName(country, b)));
+                rawCodes.forEach(code => {
+                    const opt = document.createElement('option');
+                    opt.value = code;
+                    opt.textContent = getStateName(country, code);
+                    stateSelect.appendChild(opt);
+                });
+            }
+            applyFilters();
+        });
+
+        document.getElementById('state-filter').addEventListener('change', applyFilters);
+        document.getElementById('search').addEventListener('input', applyFilters);
+
+        // ── Filtering ─────────────────────────────────────────────────────────────────
+        function applyFilters() {
+            const q = document.getElementById('search').value.toLowerCase().trim();
+            const country = document.getElementById('country-filter').value;
+            const state = document.getElementById('state-filter').value;
+
+            const filtered = allTeams.filter(t => {
+                if (country && t.country !== country) return false;
+                if (state && t.state !== state) return false;
+                if (q) {
+                    const stateFull = getStateName(t.country, t.state).toLowerCase();
+                    const countryFull = getCountryName(t.country).toLowerCase();
+                    const haystack = [
+                        String(t.number || ''), t.nameFull, t.nameShort,
+                        t.city, t.state, stateFull, t.country, countryFull, t.school,
+                    ].filter(Boolean).join(' ').toLowerCase();
+                    if (!haystack.includes(q)) return false;
+                }
+                return true;
+            });
+
+            renderMarkers(filtered);
+        }
+
+        function resetFilters() {
+            document.getElementById('search').value = '';
+            document.getElementById('country-filter').value = '';
+            document.getElementById('state-filter').innerHTML = '<option value="">All states / provinces</option>';
+            renderMarkers(allTeams);
+        }
+
+        // ── Render markers ────────────────────────────────────────────────────────────
+        function renderMarkers(teams) {
+            clusterGroup.clearLayers();
+
+            const layers = teams.map(t => {
+                const stateFull = getStateName(t.country, t.state);
+                const countryFull = getCountryName(t.country);
+                const location = [t.city, stateFull, countryFull].filter(Boolean).join(', ');
+                const school = t.school
+                    ? `<div style="margin-top:4px;font-size:11px;color:#555">🏫 ${escapeHtml(t.school)}</div>`
+                    : '';
+
+                return L.marker([t.lat, t.lng]).bindPopup(`
+      <div style="font-size:13px;min-width:190px;line-height:1.6">
+        <div style="font-size:11px;color:#999;font-weight:600">#${t.number}</div>
+        <div style="color:#d62728;font-weight:700;font-size:14px">${escapeHtml(t.nameFull || t.nameShort)}</div>
+        ${t.nameShort && t.nameShort !== t.nameFull
+                        ? `<div style="font-size:11px;color:#777;font-style:italic">"${escapeHtml(t.nameShort)}"</div>`
+                        : ''}
+        ${school}
+        <hr style="margin:6px 0;border:none;border-top:1px solid #eee">
+        <div style="font-size:11px;color:#666">📍 ${escapeHtml(location)}</div>
+      </div>
+    `);
+            });
+
+            clusterGroup.addLayers(layers);
+            document.getElementById('team-count').textContent = teams.length.toLocaleString();
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // Import the functions you need from the SDKs you need
+
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app.js";
+
+        // TODO: Add SDKs for Firebase products that you want to use
+
+        // https://firebase.google.com/docs/web/setup#available-libraries
+
+        // Your web app's Firebase configuration
+
+        const firebaseConfig = {
+
+            apiKey: "AIzaSyC2vKHfu3MU7qD1V765l3QI4odBCqqvd2E",
+
+            authDomain: "ftc-teams-map-f53e6.firebaseapp.com",
+
+            projectId: "ftc-teams-map-f53e6",
+
+            storageBucket: "ftc-teams-map-f53e6.firebasestorage.app",
+
+            messagingSenderId: "676685753072",
+
+            appId: "1:676685753072:web:fbc6c4eb0073df32f97035"
+
+        };
+
+        // Initialize Firebase
+
+        const app = initializeApp(firebaseConfig);
+    </script>
+</body>
+
+</html>
