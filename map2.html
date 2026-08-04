@@ -165,6 +165,130 @@
             border-radius: 50%;
             flex-shrink: 0;
         }
+
+        /* ── Correction form (new) ─────────────────────────────────────────── */
+        .report-link {
+            display: inline-block;
+            margin-top: 8px;
+            font-size: 11px;
+            color: #1a73e8;
+            cursor: pointer;
+            text-decoration: underline;
+            background: none;
+            border: none;
+            padding: 0;
+            font-family: inherit;
+        }
+
+        .report-link:hover {
+            opacity: 0.7;
+        }
+
+        #correction-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #correction-modal.open {
+            display: flex;
+        }
+
+        #correction-box {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            width: 320px;
+            max-width: 90vw;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        #correction-box h3 {
+            font-size: 15px;
+            margin-bottom: 4px;
+            color: #222;
+        }
+
+        #correction-box p {
+            font-size: 12px;
+            color: #777;
+            margin-bottom: 12px;
+        }
+
+        #correction-box label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            color: #555;
+            margin-top: 10px;
+            margin-bottom: 4px;
+        }
+
+        #correction-box input,
+        #correction-box textarea {
+            width: 100%;
+            padding: 7px 9px;
+            border: 1.5px solid #ddd;
+            border-radius: 6px;
+            font-size: 13px;
+            outline: none;
+            font-family: inherit;
+        }
+
+        #correction-box input:focus,
+        #correction-box textarea:focus {
+            border-color: #d62728;
+        }
+
+        #correction-box textarea {
+            resize: vertical;
+            min-height: 50px;
+        }
+
+        #correction-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        #correction-actions button {
+            flex: 1;
+            padding: 8px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            border: none;
+            font-family: inherit;
+        }
+
+        #correction-cancel {
+            background: #eee;
+            color: #333;
+        }
+
+        #correction-submit {
+            background: #d62728;
+            color: white;
+            font-weight: 600;
+        }
+
+        #correction-submit:hover,
+        #correction-cancel:hover {
+            opacity: 0.85;
+        }
+
+        #correction-status {
+            font-size: 12px;
+            margin-top: 10px;
+            text-align: center;
+        }
     </style>
 </head>
 
@@ -207,7 +331,50 @@
         </div>
     </div>
 
-    <script>
+    <!-- ── Correction submission modal (new) ─────────────────────────────── -->
+    <div id="correction-modal">
+        <div id="correction-box">
+            <h3>📍 Report wrong location</h3>
+            <p id="correction-team-label">Team #</p>
+
+            <label for="correction-city">Correct city</label>
+            <input id="correction-city" type="text" placeholder="e.g. Ann Arbor" />
+
+            <label for="correction-state">Correct state / province</label>
+            <input id="correction-state" type="text" placeholder="e.g. MI" />
+
+            <label for="correction-country">Correct country</label>
+            <input id="correction-country" type="text" placeholder="e.g. USA" />
+
+            <label for="correction-note">Note (optional)</label>
+            <textarea id="correction-note" placeholder="Anything else we should know?"></textarea>
+
+            <div id="correction-actions">
+                <button id="correction-cancel">Cancel</button>
+                <button id="correction-submit">Submit</button>
+            </div>
+            <div id="correction-status"></div>
+        </div>
+    </div>
+    <script type="module">
+        // ── Firebase setup ───────────────────────────────────────────────────────────
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app.js";
+        import {
+            getFirestore, collection, addDoc, query, where, getDocs, serverTimestamp
+        } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBfggAzEgbc922NUSDf2bVHW2ZSMbO35Qo",
+            authDomain: "ftc-teams-map-9bb3c.firebaseapp.com",
+            projectId: "ftc-teams-map-9bb3c",
+            storageBucket: "ftc-teams-map-9bb3c.firebasestorage.app",
+            messagingSenderId: "314522235078",
+            appId: "1:314522235078:web:ba454e0ef59ab5057c67c7"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
         // ── Country display name overrides ────────────────────────────────────────────
         const COUNTRY_NAMES = {
             'USA': 'United States', 'South Korea': 'South Korea', 'Türkiye': 'Turkey',
@@ -412,14 +579,20 @@
         }).addTo(map);
 
         let allTeams = [];
+        let pendingCorrectionTeam = null; // team number currently being reported
         let clusterGroup = L.markerClusterGroup({ chunkedLoading: true });
         map.addLayer(clusterGroup);
 
-        // ── Load data ─────────────────────────────────────────────────────────────────
+        // expose functions the inline HTML (onclick, popup buttons) needs
+        window.resetFilters = resetFilters;
+        window.openCorrectionModal = openCorrectionModal;
+
+        // ── Load data, then overlay any approved corrections ───────────────────────────
         fetch('ftc_teams.json')
             .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-            .then(teams => {
+            .then(async teams => {
                 allTeams = teams.filter(t => t.lat != null && t.lng != null);
+                await applyApprovedCorrections();
                 populateCountries(allTeams);
                 renderMarkers(allTeams);
             })
@@ -428,11 +601,41 @@
                 console.error(err);
             });
 
+        // ── Fetch approved corrections from Firestore and merge into allTeams ──────────
+        async function applyApprovedCorrections() {
+            try {
+                const q = query(collection(db, 'corrections'), where('status', '==', 'approved'));
+                const snap = await getDocs(q);
+                const byTeam = {};
+                snap.forEach(doc => {
+                    const d = doc.data();
+                    byTeam[d.teamNumber] = d; // last approved correction wins
+                });
+
+                allTeams = allTeams.map(t => {
+                    const c = byTeam[t.number];
+                    if (!c) return t;
+                    return {
+                        ...t,
+                        city: c.city || t.city,
+                        state: c.state || t.state,
+                        country: c.country || t.country,
+                        lat: (c.lat != null) ? c.lat : t.lat,
+                        lng: (c.lng != null) ? c.lng : t.lng,
+                    };
+                });
+            } catch (err) {
+                console.error('Could not load corrections:', err);
+                // fail silently — map still works with original data
+            }
+        }
+
         // ── Populate country dropdown ─────────────────────────────────────────────────
         function populateCountries(teams) {
             const rawCountries = [...new Set(teams.map(t => t.country).filter(Boolean))];
             rawCountries.sort((a, b) => getCountryName(a).localeCompare(getCountryName(b)));
             const sel = document.getElementById('country-filter');
+            sel.innerHTML = '<option value="">All countries</option>';
             rawCountries.forEach(raw => {
                 const opt = document.createElement('option');
                 opt.value = raw;
@@ -518,6 +721,7 @@
         ${school}
         <hr style="margin:6px 0;border:none;border-top:1px solid #eee">
         <div style="font-size:11px;color:#666">📍 ${escapeHtml(location)}</div>
+        <button class="report-link" onclick="openCorrectionModal(${JSON.stringify(t.number)})">Report wrong location</button>
       </div>
     `);
             });
@@ -531,35 +735,66 @@
             return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
-        // Import the functions you need from the SDKs you need
+        // ── Correction modal logic (new) ────────────────────────────────────────────
+        const modal = document.getElementById('correction-modal');
+        const statusEl = document.getElementById('correction-status');
 
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app.js";
+        function openCorrectionModal(teamNumber) {
+            pendingCorrectionTeam = teamNumber;
+            document.getElementById('correction-team-label').textContent = `Team #${teamNumber}`;
+            document.getElementById('correction-city').value = '';
+            document.getElementById('correction-state').value = '';
+            document.getElementById('correction-country').value = '';
+            document.getElementById('correction-note').value = '';
+            statusEl.textContent = '';
+            modal.classList.add('open');
+        }
 
-        // TODO: Add SDKs for Firebase products that you want to use
+        document.getElementById('correction-cancel').addEventListener('click', () => {
+            modal.classList.remove('open');
+        });
 
-        // https://firebase.google.com/docs/web/setup#available-libraries
+        document.getElementById('correction-submit').addEventListener('click', async () => {
+            const city = document.getElementById('correction-city').value.trim();
+            const state = document.getElementById('correction-state').value.trim();
+            const country = document.getElementById('correction-country').value.trim();
+            const note = document.getElementById('correction-note').value.trim();
 
-        // Your web app's Firebase configuration
+            if (!city && !state && !country && !note) {
+                statusEl.textContent = 'Please fill in at least one field.';
+                statusEl.style.color = '#d62728';
+                return;
+            }
 
-        const firebaseConfig = {
+            statusEl.textContent = 'Submitting…';
+            statusEl.style.color = '#777';
 
-            apiKey: "AIzaSyC2vKHfu3MU7qD1V765l3QI4odBCqqvd2E",
+            try {
+                await addDoc(collection(db, 'corrections'), {
+                    teamNumber: pendingCorrectionTeam,
+                    city: city || null,
+                    state: state || null,
+                    country: country || null,
+                    lat: null,
+                    lng: null,
+                    note: note || null,
+                    status: 'pending',
+                    submittedAt: serverTimestamp(),
+                });
+                statusEl.textContent = '✅ Submitted! Thank you.';
+                statusEl.style.color = '#1a9850';
+                setTimeout(() => modal.classList.remove('open'), 1200);
+            } catch (err) {
+                console.error(err);
+                statusEl.textContent = '⚠ Could not submit. Try again.';
+                statusEl.style.color = '#d62728';
+            }
+        });
 
-            authDomain: "ftc-teams-map-f53e6.firebaseapp.com",
-
-            projectId: "ftc-teams-map-f53e6",
-
-            storageBucket: "ftc-teams-map-f53e6.firebasestorage.app",
-
-            messagingSenderId: "676685753072",
-
-            appId: "1:676685753072:web:fbc6c4eb0073df32f97035"
-
-        };
-
-        // Initialize Firebase
-
-        const app = initializeApp(firebaseConfig);
+        // click outside box to close
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.classList.remove('open');
+        });
     </script>
 </body>
 
