@@ -602,31 +602,93 @@
             });
 
         // ── Fetch approved corrections from Firestore and merge into allTeams ──────────
+        // async function applyApprovedCorrections() {
+        //     try {
+        //         const q = query(collection(db, 'corrections'), where('status', '==', 'approved'));
+        //         const snap = await getDocs(q);
+        //         const byTeam = {};
+        //         snap.forEach(doc => {
+        //             const d = doc.data();
+        //             byTeam[d.teamNumber] = d; // last approved correction wins
+        //         });
+
+        //         allTeams = allTeams.map(t => {
+        //             const c = byTeam[t.number];
+        //             if (!c) return t;
+        //             return {
+        //                 ...t,
+        //                 city: c.city || t.city,
+        //                 state: c.state || t.state,
+        //                 country: c.country || t.country,
+        //                 lat: (c.lat != null) ? c.lat : t.lat,
+        //                 lng: (c.lng != null) ? c.lng : t.lng,
+        //             };
+        //         });
+        //     } catch (err) {
+        //         console.error('Could not load corrections:', err);
+        //         // fail silently — map still works with original data
+        //     }
+        // }
         async function applyApprovedCorrections() {
             try {
-                const q = query(collection(db, 'corrections'), where('status', '==', 'approved'));
+                const q = query(
+                    collection(db, 'corrections'),
+                    where('status', '==', 'approved')
+                );
+
                 const snap = await getDocs(q);
+
                 const byTeam = {};
+
                 snap.forEach(doc => {
                     const d = doc.data();
-                    byTeam[d.teamNumber] = d; // last approved correction wins
+                    const key = String(d.teamNumber);
+
+                    const existing = byTeam[key];
+
+                    if (!existing) {
+                        byTeam[key] = d;
+                        return;
+                    }
+
+                    // Keep newest correction
+                    const existingTime =
+                        existing.submittedAt?.toMillis?.() || 0;
+
+                    const newTime =
+                        d.submittedAt?.toMillis?.() || 0;
+
+                    if (newTime > existingTime) {
+                        byTeam[key] = d;
+                    }
                 });
 
                 allTeams = allTeams.map(t => {
-                    const c = byTeam[t.number];
+                    const c = byTeam[String(t.number)];
+
                     if (!c) return t;
+
+                    console.log("APPLYING:", {
+                        team: t.number,
+                        oldLat: t.lat,
+                        oldLng: t.lng,
+                        newLat: c.lat,
+                        newLng: c.lng,
+                        submittedAt: c.submittedAt
+                    });
+
                     return {
                         ...t,
                         city: c.city || t.city,
                         state: c.state || t.state,
                         country: c.country || t.country,
-                        lat: (c.lat != null) ? c.lat : t.lat,
-                        lng: (c.lng != null) ? c.lng : t.lng,
+                        lat: c.lat != null ? c.lat : t.lat,
+                        lng: c.lng != null ? c.lng : t.lng,
                     };
                 });
+
             } catch (err) {
                 console.error('Could not load corrections:', err);
-                // fail silently — map still works with original data
             }
         }
 
