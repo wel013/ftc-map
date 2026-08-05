@@ -2,7 +2,8 @@ name: Regeocode approved corrections
 
 on:
   schedule:
-    - cron: '0 */6 * * *'   # every 6 hours
+    # - cron: '0 */6 * * *'   # every 6 hours
+    - cron: '*/5 * * * *'
   workflow_dispatch:         # lets you also trigger it manually from GitHub UI
 
 jobs:
