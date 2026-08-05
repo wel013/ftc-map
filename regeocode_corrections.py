@@ -18,19 +18,23 @@ Setup (one-time):
 """
 
 import time
+import os
+import json
 import firebase_admin
 from firebase_admin import credentials, firestore
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 
 # ── Config ────────────────────────────────────────────────────────────────────
-SERVICE_ACCOUNT_PATH = "serviceAccountKey.json"
+# SERVICE_ACCOUNT_PATH = "serviceAccountKey.json"
+service_account_info = json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"])
 # seconds between geocoding requests (Nominatim requires >= 1)
 DELAY = 1.1
 MAX_RETRIES = 3
 
 # ── Init Firebase Admin ──────────────────────────────────────────────────────
-cred = credentials.Certificate(SERVICE_ACCOUNT_PATH)
+# cred = credentials.Certificate(SERVICE_ACCOUNT_PATH)
+cred = credentials.Certificate(service_account_info)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
